@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Penales VR - Banco Pichincha</title>
+<style>
+@font-face{font-family:"Montserrat PV";src:url("/recursos/montserrat.woff2") format("woff2");font-weight:100 900;font-display:swap}
+:root{
+  --amarillo:#ffdb09;--azul:#242d56;--gris:#eef2f3;--rojo:#de2a29;
+  --u:min(1vw,.5625vh);
+  --tipo:"Montserrat PV","Avenir Next","Century Gothic","Segoe UI",Roboto,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--amarillo);color:var(--azul);font-family:var(--tipo);font-variant-numeric:tabular-nums;overflow:hidden}
+.columna{width:calc(var(--u)*100);height:100vh;margin:0 auto;display:flex;flex-direction:column}
+.marca{display:block;width:100%;height:auto;flex:none}
+main{flex:1;display:flex;flex-direction:column;justify-content:center;gap:calc(var(--u)*7);padding:0 calc(var(--u)*8)}
+.jugador{margin:0;font-size:calc(var(--u)*4.6);font-weight:500}
+.jugador b{font-weight:800}
+.marcador{display:flex;align-items:flex-end;gap:calc(var(--u)*4)}
+.marcador strong{font-size:calc(var(--u)*46);font-weight:800;line-height:.74;letter-spacing:-.04em}
+.marcador.doble strong{font-size:calc(var(--u)*34)}
+.marcador span{font-size:calc(var(--u)*6.4);font-weight:600;line-height:1.1}
+.tiros{list-style:none;margin:0;padding:0;display:grid;gap:calc(var(--u)*2.6)}
+.tiros.dos{grid-template-columns:1fr 1fr;column-gap:calc(var(--u)*5)}
+.tiro{display:flex;align-items:center;gap:calc(var(--u)*4);font-size:calc(var(--u)*6);font-weight:600}
+.dos .tiro{font-size:calc(var(--u)*4.6);gap:calc(var(--u)*3)}
+.bola{flex:none;width:calc(var(--u)*11.5);aspect-ratio:1;border-radius:50%;display:grid;place-items:center;font-size:calc(var(--u)*5.2);font-weight:800}
+.dos .bola{width:calc(var(--u)*9.5);font-size:calc(var(--u)*4.4)}
+.atajado{font-weight:800}
+.atajado .bola{background:var(--azul);color:var(--amarillo)}
+.goal{font-weight:500}
+.goal .bola{background:var(--gris);color:var(--azul)}
+.vacio{font-weight:400}
+.vacio .bola{border:calc(var(--u)*.5) dashed var(--azul);font-weight:500}
+.nuevo .marcador strong{animation:golpe .5s cubic-bezier(.2,.8,.2,1) both}
+.nuevo .tiro{animation:entra .45s cubic-bezier(.2,.8,.2,1) both;animation-delay:calc(200ms + var(--i) * 120ms)}
+@keyframes golpe{from{opacity:0;transform:scale(.7)}}
+@keyframes entra{from{opacity:0;transform:translateX(calc(var(--u)*-6))}}
+@media (prefers-reduced-motion:reduce){.nuevo .tiro,.nuevo .marcador strong{animation:none}}
+.espera{margin:0;font-size:calc(var(--u)*7);font-weight:800;line-height:1.15;max-width:16ch}
+.espera span{display:block;margin-top:calc(var(--u)*3);font-size:calc(var(--u)*4.6);font-weight:500;line-height:1.4;max-width:28ch}
+footer{flex:none;display:flex;align-items:center;gap:calc(var(--u)*2);padding:0 calc(var(--u)*8) calc(var(--u)*6);
+  font-size:calc(var(--u)*3.2);font-weight:500}
+footer::before{content:"";flex:none;width:calc(var(--u)*2);height:calc(var(--u)*2);border-radius:50%;background:var(--azul)}
+footer.caido::before{background:var(--rojo)}
+</style>
+</head>
+<body>
+<div class="columna">
+  <img class="marca" src="/recursos/logo.png" width="1600" height="391" alt="Banco Pichincha y Mastercard">
+  <main id="panel">
+    <p class="espera">Todav&iacute;a no termina ning&uacute;n jugador.<span>El resultado aparece aqu&iacute; en cuanto acabe su tanda.</span></p>
+  </main>
+  <footer id="conexion">Conectando</footer>
+</div>
+<script>
+var ETIQUETA={atajado:"Atajada",goal:"Gol",vacio:"Sin tiro"};
+var version=-1;
+var panel=document.getElementById("panel");
+var conexion=document.getElementById("conexion");
+
+function pintar(d){
+  var n=d.tiros.length;
+  var bolas=d.tiros.map(function(t,i){
+    return '<li class="tiro '+t.r+'" style="--i:'+i+'"><span class="bola">'+(i+1)+'</span>'+ETIQUETA[t.r]+'</li>';
+  }).join("");
+  panel.className="nuevo";
+  panel.innerHTML=
+    '<p class="jugador"><b>Jugador '+d.jugador+'</b>, termin\u00f3 a las '+String(d.hora).slice(0,5)+'</p>'+
+    '<div class="marcador'+(d.atajados>9?' doble':'')+'"><strong>'+d.atajados+'</strong>'+
+    '<span>'+(d.atajados===1?"atajada":"atajadas")+'<br>de '+n+' tiros</span></div>'+
+    '<ol class="tiros'+(n>5?' dos':'')+'">'+bolas+'</ol>';
+}
+
+function actualizar(){
+  fetch("/api/tiros",{cache:"no-store"})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      conexion.className="";
+      conexion.textContent="En l\u00ednea";
+      if(d.version!==version){version=d.version;if(d.jugador>0){pintar(d);}}
+    })
+    .catch(function(){
+      // Si se cae el internet de la pantalla, se conserva el ultimo resultado recibido
+      conexion.className="caido";
+      conexion.textContent="Sin conexi\u00f3n a internet. Se muestra el \u00faltimo resultado.";
+    });
+}
+actualizar();
+setInterval(actualizar,2000);
+</script>
+</body>
+</html>
