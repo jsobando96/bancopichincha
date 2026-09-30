@@ -6,11 +6,11 @@ const redis = new Redis({
   token: process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN,
 });
 
-const CLAVE_ULTIMO = "penales:ultimo";
+const CLAVE_ACTUAL = "penales:ultimo";
 const CLAVE_CONTADOR = "penales:jugador";
 const CLAVE_HISTORIAL = "penales:historial";
 const RESULTADOS = new Set(["vacio", "goal", "atajado"]);
-const SIN_DATOS = { version: 0, jugador: 0, tiros: [] };
+const SIN_DATOS = { version: "", jugador: 0, tiros: [] };
 
 function responder(datos, estado = 200) {
   return new Response(JSON.stringify(datos), {
@@ -19,13 +19,13 @@ function responder(datos, estado = 200) {
   });
 }
 
-// El panel consulta aqui el resultado del ultimo jugador
+// El panel consulta aqui la tanda actual (en juego o la ultima terminada)
 export async function GET() {
-  const ultimo = await redis.get(CLAVE_ULTIMO);
-  return responder(ultimo ?? SIN_DATOS);
+  const actual = await redis.get(CLAVE_ACTUAL);
+  return responder(actual ?? SIN_DATOS);
 }
 
-// El juego publica aqui cuando el jugador termina su tanda
+// El juego publica aqui al empezar la tanda, despues de cada tiro y al terminar
 export async function POST(request) {
   const token = process.env.PANEL_TOKEN;
   if (!token || request.headers.get("authorization") !== `Bearer ${token}`) {
@@ -39,23 +39,41 @@ export async function POST(request) {
     return responder({ error: "JSON invalido" }, 400);
   }
 
-  const tiros = cuerpo?.tiros;
+  const { id, secuencia, terminado, tiros } = cuerpo ?? {};
   const valido =
+    typeof id === "string" &&
+    /^[A-Za-z0-9-]{1,64}$/.test(id) &&
+    Number.isInteger(secuencia) &&
+    secuencia > 0 &&
+    typeof terminado === "boolean" &&
     Array.isArray(tiros) &&
-    tiros.length > 0 &&
     tiros.length <= 20 &&
     tiros.every((t) => Number.isInteger(t?.n) && RESULTADOS.has(t?.r));
   if (!valido) {
-    return responder({ error: "Formato de tiros invalido" }, 400);
+    return responder({ error: "Formato invalido" }, 400);
+  }
+
+  const actual = await redis.get(CLAVE_ACTUAL);
+  let jugador;
+  if (actual?.id === id) {
+    // Reintento repetido o actualizacion atrasada: ya se mostro algo igual o mas nuevo
+    if (secuencia <= actual.secuencia) {
+      return responder({ ...actual, ignorado: true });
+    }
+    jugador = actual.jugador;
+  } else {
+    jugador = await redis.incr(CLAVE_CONTADOR);
   }
 
   const ordenados = tiros.map(({ n, r }) => ({ n, r })).sort((a, b) => a.n - b.n);
-  const jugador = await redis.incr(CLAVE_CONTADOR);
   const ahora = new Date();
 
   const resultado = {
-    version: jugador,
+    version: `${id}:${secuencia}`,
+    id,
+    secuencia,
     jugador,
+    estado: terminado ? "terminado" : "en_juego",
     hora: ahora.toLocaleTimeString("es-EC", {
       timeZone: "America/Guayaquil",
       hour: "2-digit",
@@ -69,9 +87,11 @@ export async function POST(request) {
   };
 
   const lote = redis.pipeline();
-  lote.set(CLAVE_ULTIMO, resultado);
-  lote.lpush(CLAVE_HISTORIAL, resultado); // registro de todos los jugadores (ultimos 2000)
-  lote.ltrim(CLAVE_HISTORIAL, 0, 1999);
+  lote.set(CLAVE_ACTUAL, resultado);
+  if (terminado) {
+    lote.lpush(CLAVE_HISTORIAL, resultado); // registro de jugadores terminados (ultimos 2000)
+    lote.ltrim(CLAVE_HISTORIAL, 0, 1999);
+  }
   await lote.exec();
 
   return responder(resultado);
