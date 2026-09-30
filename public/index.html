@@ -11,6 +11,7 @@
   --amarillo:#ffdb09;--azul:#242d56;--gris:#eef2f3;--rojo:#de2a29;
   --u:min(1vw,.5625vh);
   --tipo:"Montserrat PV","Avenir Next","Century Gothic","Segoe UI",Roboto,sans-serif;
+  --curva:cubic-bezier(.2,.8,.2,1);
 }
 *{box-sizing:border-box}
 html,body{margin:0;height:100%}
@@ -18,12 +19,18 @@ body{background:var(--amarillo);color:var(--azul);font-family:var(--tipo);font-v
 .columna{width:calc(var(--u)*100);height:100vh;margin:0 auto;display:flex;flex-direction:column}
 .marca{display:block;width:100%;height:auto;flex:none}
 main{flex:1;display:flex;flex-direction:column;justify-content:center;gap:calc(var(--u)*7);padding:0 calc(var(--u)*8)}
-.jugador{margin:0;font-size:calc(var(--u)*4.6);font-weight:500}
+
+.jugador{margin:0;display:flex;align-items:center;flex-wrap:wrap;gap:0 calc(var(--u)*2.4);font-size:calc(var(--u)*4.6);font-weight:500}
 .jugador b{font-weight:800}
+.vivo{display:inline-flex;align-items:center;gap:calc(var(--u)*1.6);font-weight:700}
+.vivo::before{content:"";width:calc(var(--u)*2.4);height:calc(var(--u)*2.4);border-radius:50%;background:var(--rojo);animation:latido 1.2s ease-in-out infinite}
+@keyframes latido{50%{opacity:.2}}
+
 .marcador{display:flex;align-items:flex-end;gap:calc(var(--u)*4)}
 .marcador strong{font-size:calc(var(--u)*46);font-weight:800;line-height:.74;letter-spacing:-.04em}
 .marcador.doble strong{font-size:calc(var(--u)*34)}
 .marcador span{font-size:calc(var(--u)*6.4);font-weight:600;line-height:1.1}
+
 .tiros{list-style:none;margin:0;padding:0;display:grid;gap:calc(var(--u)*2.6)}
 .tiros.dos{grid-template-columns:1fr 1fr;column-gap:calc(var(--u)*5)}
 .tiro{display:flex;align-items:center;gap:calc(var(--u)*4);font-size:calc(var(--u)*6);font-weight:600}
@@ -36,11 +43,22 @@ main{flex:1;display:flex;flex-direction:column;justify-content:center;gap:calc(v
 .goal .bola{background:var(--gris);color:var(--azul)}
 .vacio{font-weight:400}
 .vacio .bola{border:calc(var(--u)*.5) dashed var(--azul);font-weight:500}
-.nuevo .marcador strong{animation:golpe .5s cubic-bezier(.2,.8,.2,1) both}
-.nuevo .tiro{animation:entra .45s cubic-bezier(.2,.8,.2,1) both;animation-delay:calc(200ms + var(--i) * 120ms)}
+.siguiente{font-weight:700}
+.siguiente .bola{border:calc(var(--u)*.8) solid var(--azul);animation:llama 1.2s ease-in-out infinite}
+@keyframes llama{50%{transform:scale(1.1)}}
+
+/* Jugador nuevo: entra toda la tanda. Mismo jugador: solo se anima el tiro que cambio. */
+.nuevo .marcador strong{animation:golpe .5s var(--curva) both}
+.nuevo .tiro{animation:entra .45s var(--curva) both;animation-delay:calc(200ms + var(--i) * 120ms)}
+.sube strong{animation:golpe .5s var(--curva) both}
+.cambio .bola{animation:revela .7s var(--curva) both}
+.cambio{animation:resalta .7s var(--curva) both}
 @keyframes golpe{from{opacity:0;transform:scale(.7)}}
 @keyframes entra{from{opacity:0;transform:translateX(calc(var(--u)*-6))}}
-@media (prefers-reduced-motion:reduce){.nuevo .tiro,.nuevo .marcador strong{animation:none}}
+@keyframes revela{0%{transform:scale(.4)}60%{transform:scale(1.18)}100%{transform:none}}
+@keyframes resalta{from{opacity:0;transform:translateX(calc(var(--u)*-3))}}
+@media (prefers-reduced-motion:reduce){*,*::before{animation:none!important}}
+
 .espera{margin:0;font-size:calc(var(--u)*7);font-weight:800;line-height:1.15;max-width:16ch}
 .espera span{display:block;margin-top:calc(var(--u)*3);font-size:calc(var(--u)*4.6);font-weight:500;line-height:1.4;max-width:28ch}
 footer{flex:none;display:flex;align-items:center;gap:calc(var(--u)*2);padding:0 calc(var(--u)*8) calc(var(--u)*6);
@@ -53,27 +71,47 @@ footer.caido::before{background:var(--rojo)}
 <div class="columna">
   <img class="marca" src="/recursos/logo.png" width="1600" height="391" alt="Banco Pichincha y Mastercard">
   <main id="panel">
-    <p class="espera">Todav&iacute;a no termina ning&uacute;n jugador.<span>El resultado aparece aqu&iacute; en cuanto acabe su tanda.</span></p>
+    <p class="espera">Todav&iacute;a no empieza ning&uacute;n jugador.<span>Los tiros aparecen aqu&iacute; en vivo apenas arranque la tanda.</span></p>
   </main>
   <footer id="conexion">Conectando</footer>
 </div>
 <script>
 var ETIQUETA={atajado:"Atajada",goal:"Gol",vacio:"Sin tiro"};
-var version=-1;
+var previo=null;
 var panel=document.getElementById("panel");
 var conexion=document.getElementById("conexion");
 
 function pintar(d){
+  var enJuego=d.estado==="en_juego";
+  var mismo=previo!==null&&previo.id===d.id;
   var n=d.tiros.length;
-  var bolas=d.tiros.map(function(t,i){
-    return '<li class="tiro '+t.r+'" style="--i:'+i+'"><span class="bola">'+(i+1)+'</span>'+ETIQUETA[t.r]+'</li>';
-  }).join("");
-  panel.className="nuevo";
+
+  var siguiente=-1;
+  if(enJuego){for(var k=0;k<n;k++){if(d.tiros[k].r==="vacio"){siguiente=k;break;}}}
+
+  var filas="";
+  for(var i=0;i<n;i++){
+    var t=d.tiros[i], clase=t.r, texto=ETIQUETA[t.r];
+    if(t.r==="vacio"&&enJuego){
+      if(i===siguiente){clase+=" siguiente";texto="Siguiente tiro";}else{texto="Pendiente";}
+    }
+    if(mismo&&previo.tiros[i]&&previo.tiros[i].r!==t.r&&t.r!=="vacio"){clase+=" cambio";}
+    filas+='<li class="tiro '+clase+'" style="--i:'+i+'"><span class="bola">'+(i+1)+'</span>'+texto+'</li>';
+  }
+
+  var cabecera=enJuego
+    ?'<b>Jugador '+d.jugador+'</b><span class="vivo">en juego</span>'
+    :'<b>Jugador '+d.jugador+'</b><span>termin\u00f3 a las '+String(d.hora).slice(0,5)+'</span>';
+
+  var clasesMarcador="marcador"+(d.atajados>9?" doble":"")+(mismo&&previo.atajados!==d.atajados?" sube":"");
+
+  panel.className=mismo?"":"nuevo";
   panel.innerHTML=
-    '<p class="jugador"><b>Jugador '+d.jugador+'</b>, termin\u00f3 a las '+String(d.hora).slice(0,5)+'</p>'+
-    '<div class="marcador'+(d.atajados>9?' doble':'')+'"><strong>'+d.atajados+'</strong>'+
+    '<p class="jugador">'+cabecera+'</p>'+
+    '<div class="'+clasesMarcador+'"><strong>'+d.atajados+'</strong>'+
     '<span>'+(d.atajados===1?"atajada":"atajadas")+'<br>de '+n+' tiros</span></div>'+
-    '<ol class="tiros'+(n>5?' dos':'')+'">'+bolas+'</ol>';
+    (n>0?'<ol class="tiros'+(n>5?' dos':'')+'">'+filas+'</ol>':'');
+  previo=d;
 }
 
 function actualizar(){
@@ -82,16 +120,16 @@ function actualizar(){
     .then(function(d){
       conexion.className="";
       conexion.textContent="En l\u00ednea";
-      if(d.version!==version){version=d.version;if(d.jugador>0){pintar(d);}}
+      if(d.jugador>0&&(previo===null||d.version!==previo.version)){pintar(d);}
     })
     .catch(function(){
-      // Si se cae el internet de la pantalla, se conserva el ultimo resultado recibido
+      // Si se cae el internet de la pantalla, se conserva lo ultimo recibido
       conexion.className="caido";
-      conexion.textContent="Sin conexi\u00f3n a internet. Se muestra el \u00faltimo resultado.";
+      conexion.textContent="Sin conexi\u00f3n a internet. Se muestra lo \u00faltimo recibido.";
     });
 }
 actualizar();
-setInterval(actualizar,2000);
+setInterval(actualizar,1000);
 </script>
 </body>
 </html>
